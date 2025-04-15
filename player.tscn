@@ -1,0 +1,544 @@
+[gd_scene load_steps=46 format=3 uid="uid://ds1itpob76efe"]
+
+[ext_resource type="Texture2D" uid="uid://dy0vn31vj4r56" path="res://Sprites copy/Idle.png" id="1_a23g7"]
+[ext_resource type="Texture2D" uid="uid://b3wx451d28qdj" path="res://Sprites copy/Attack1.png" id="1_gbc4x"]
+[ext_resource type="Texture2D" uid="uid://c26252n1k5nmx" path="res://Sprites copy/Jump.png" id="2_3r8q2"]
+[ext_resource type="Texture2D" uid="uid://cupt7hgvjhaeq" path="res://Sprites copy/Attack2.png" id="2_4lm6s"]
+[ext_resource type="Texture2D" uid="uid://l28n7ucfwpyn" path="res://Sprites copy/Run.png" id="2_42hq4"]
+[ext_resource type="Texture2D" uid="uid://cffqm3hl7vn60" path="res://Sprites copy/Fall.png" id="3_l1lpf"]
+[ext_resource type="Texture2D" uid="uid://cxwkp128fpxdw" path="res://Sprites copy/Death.png" id="3_r0xu6"]
+[ext_resource type="Texture2D" uid="uid://c3wrs3apbahku" path="res://Sprites copy/Take hit.png" id="8_6dj5s"]
+
+[sub_resource type="GDScript" id="GDScript_k3hrk"]
+resource_name = "player.gd"
+script/source = "extends CharacterBody2D
+
+@export var speed: float = 200.0
+@export var jump_velocity: float = -150.0
+@export var double_jump_velocity: float = -150
+@export var attack_cooldown: float = 0.5
+@export var max_health: int = 100
+@export var hitbox_offset: Vector2 = Vector2(20, 0)  # Set this to match your current right-side offset
+var last_attack_was_1: bool = false
+var is_dead: bool = false
+var current_health: int = max_health
+@onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite2D
+var gravity = ProjectSettings.get_setting(\"physics/2d/default_gravity\")
+var has_double_jumped: bool = false
+var animation_locked: bool = false
+var direction: Vector2 = Vector2.ZERO
+var was_in_air: bool = false
+var can_attack: bool = true
+var is_attacking: bool = false
+
+# This function processes all physics-related movements like gravity, jumping, etc.
+func _physics_process(delta: float) -> void:
+	if is_dead:
+		return # if dead, ignore input
+
+	# Add gravity.
+	if not is_on_floor():
+		velocity += get_gravity() * delta
+		was_in_air = true
+	else:
+		has_double_jumped = false
+		if was_in_air:
+			land()
+			was_in_air = false
+
+	# Handle jump.
+	if Input.is_action_just_pressed(\"jump_start\") and not is_attacking:
+		if is_on_floor():
+			jump()
+		elif not has_double_jumped:
+			double_jump()
+
+	# Handle attack input
+	if Input.is_action_just_pressed(\"attack1\") and can_attack and not is_attacking:
+		if last_attack_was_1:
+			attack2()
+		else:
+			attack1()
+		last_attack_was_1 = !last_attack_was_1
+	
+	# Movement input (skip this if attacking!)
+	if not is_attacking:
+		direction = Input.get_vector(\"left\", \"right\", \"up\", \"down\")
+		if direction.x != 0 and animated_sprite.animation != \"jump_end\":
+			velocity.x = direction.x * speed
+		else:
+			velocity.x = move_toward(velocity.x, 0, speed)
+	else:
+		# Freeze horizontal movement while attacking
+		velocity.x = 0
+
+	move_and_slide()
+	update_animation()
+	update_facing_direction()
+	update_hitbox_position()
+
+# Updates the animation based on current state
+func update_animation():
+	if not animation_locked:
+		if is_attacking:
+			# Don't override attack animation
+			return
+		elif not is_on_floor():
+			animated_sprite.play(\"jump_loop\")
+		elif direction.x != 0:
+			animated_sprite.play(\"run\")
+		else:
+			animated_sprite.play(\"idle\")
+
+# Update character facing direction
+func update_facing_direction():
+	if direction.x > 0:
+		animated_sprite.flip_h = false
+	elif direction.x < 0:
+		animated_sprite.flip_h = true
+
+# Handle normal jump
+func jump():
+	velocity.y = jump_velocity
+	animated_sprite.play(\"jump_start\")
+	animation_locked = true
+
+# Handle double jump
+func double_jump():
+	velocity.y = double_jump_velocity
+	animated_sprite.play(\"jump_double\")
+	animation_locked = true
+	has_double_jumped = true
+
+# Handle landing animation
+func land():
+	animated_sprite.play(\"jump_end\")
+	animation_locked = true
+
+# Basic attack logic for attack1
+func attack1() -> void:
+	is_attacking = true
+	can_attack = false
+	animation_locked = true
+	animated_sprite.play(\"attack1\")
+
+	# Enable the hitbox right when the attack starts
+	$HitBox.monitoring = true
+
+	# Wait a short moment to simulate active attack window
+	await get_tree().create_timer(0.2).timeout # Adjust this to match your hit timing
+
+	# Disable hitbox after the attack window
+	$HitBox.monitoring = false
+
+	# Wait until the attack animation is fully over
+	await animated_sprite.animation_finished
+
+	can_attack = true
+	is_attacking = false
+	animation_locked = false
+	
+# Alternate attack logic for attack2
+func attack2() -> void:
+	is_attacking = true
+	can_attack = false
+	animation_locked = true
+	animated_sprite.play(\"attack2\")
+
+	$HitBox.monitoring = true
+	await get_tree().create_timer(0.2).timeout
+	$HitBox.monitoring = false
+
+	await animated_sprite.animation_finished
+
+	can_attack = true
+	is_attacking = false
+	animation_locked = false
+
+# Take damage and trigger \"take hit\" animation
+func take_hit() -> void:
+	if animation_locked:
+		return # Prevent interrupting other critical animations like death
+
+	is_attacking = false
+	can_attack = false
+	animation_locked = true
+	animated_sprite.play(\"takeHit\")
+
+	await animated_sprite.animation_finished
+
+	can_attack = true
+	animation_locked = false
+	
+# Function for taking damage
+func take_damage(amount: int = 1) -> void:
+	if is_dead or animation_locked:
+		return
+
+	current_health -= amount
+	print(\"Health:\", current_health)
+
+	# Check if the health is below 0 and handle the death logic
+	if current_health <= 0:
+		die()
+	else:
+		take_hit()
+
+# Handle death logic
+func die() -> void:
+	if is_dead:
+		return
+
+	# Mark character as dead
+	is_dead = true
+	is_attacking = false
+	can_attack = false
+	animation_locked = true
+	velocity = Vector2.ZERO # Stop movement
+	animated_sprite.play(\"death\")
+
+	# Wait for death animation to finish
+	await animated_sprite.animation_finished
+	current_health = max_health
+
+	# Reload the scene for respawn
+	get_tree().reload_current_scene()
+
+# Update hitbox position based on sprite's facing direction
+func update_hitbox_position():
+	if animated_sprite.flip_h:
+		$HitBox.position = Vector2(-hitbox_offset.x, hitbox_offset.y)
+	else:
+		$HitBox.position = hitbox_offset
+		
+# Called when animation finishes
+func _on_animated_sprite_2d_animation_finished():
+	if [\"jump_end\", \"jump_start\", \"jump_double\", \"fall\", \"takeHit\"].has(animated_sprite.animation):
+		animation_locked = false
+	elif [\"attack1\", \"attack2\"].has(animated_sprite.animation):
+		is_attacking = false
+		animation_locked = false
+	elif animated_sprite.animation == \"death\":
+		pass
+
+# Hitbox collision detection
+func _on_hit_box_body_entered(body: Node2D):
+	if body.is_in_group(\"enemies\"):
+		print(\"Hit: \", body.name)
+		take_damage(1)
+"
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_f3r7p"]
+atlas = ExtResource("1_gbc4x")
+region = Rect2(0, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_82gjj"]
+atlas = ExtResource("1_gbc4x")
+region = Rect2(200, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_fwjb0"]
+atlas = ExtResource("1_gbc4x")
+region = Rect2(400, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_7q66e"]
+atlas = ExtResource("1_gbc4x")
+region = Rect2(600, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_535me"]
+atlas = ExtResource("2_4lm6s")
+region = Rect2(0, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_xwuvi"]
+atlas = ExtResource("2_4lm6s")
+region = Rect2(200, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_yifyp"]
+atlas = ExtResource("2_4lm6s")
+region = Rect2(400, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_wxodl"]
+atlas = ExtResource("2_4lm6s")
+region = Rect2(600, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_tcwfc"]
+atlas = ExtResource("3_r0xu6")
+region = Rect2(0, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_vqvgc"]
+atlas = ExtResource("3_r0xu6")
+region = Rect2(200, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_g3wkd"]
+atlas = ExtResource("3_r0xu6")
+region = Rect2(400, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_2e5qg"]
+atlas = ExtResource("3_r0xu6")
+region = Rect2(600, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_mcsfj"]
+atlas = ExtResource("3_r0xu6")
+region = Rect2(800, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_7a4eu"]
+atlas = ExtResource("3_r0xu6")
+region = Rect2(1000, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_dqe2v"]
+atlas = ExtResource("3_r0xu6")
+region = Rect2(1200, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_lkmrg"]
+atlas = ExtResource("1_a23g7")
+region = Rect2(0, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_7830m"]
+atlas = ExtResource("1_a23g7")
+region = Rect2(200, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_lill7"]
+atlas = ExtResource("1_a23g7")
+region = Rect2(400, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_p1ulr"]
+atlas = ExtResource("1_a23g7")
+region = Rect2(600, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_sgfj1"]
+atlas = ExtResource("2_3r8q2")
+region = Rect2(200, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_upws8"]
+atlas = ExtResource("3_l1lpf")
+region = Rect2(0, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_yymx5"]
+atlas = ExtResource("3_l1lpf")
+region = Rect2(200, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_rkv5g"]
+atlas = ExtResource("3_l1lpf")
+region = Rect2(0, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_xw1s7"]
+atlas = ExtResource("3_l1lpf")
+region = Rect2(200, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_4x3l2"]
+atlas = ExtResource("2_3r8q2")
+region = Rect2(0, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_pd8o8"]
+atlas = ExtResource("2_3r8q2")
+region = Rect2(0, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_tmyxo"]
+atlas = ExtResource("2_42hq4")
+region = Rect2(0, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_f2xw6"]
+atlas = ExtResource("2_42hq4")
+region = Rect2(200, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_ifigv"]
+atlas = ExtResource("2_42hq4")
+region = Rect2(400, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_hyqgq"]
+atlas = ExtResource("2_42hq4")
+region = Rect2(600, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_yu4es"]
+atlas = ExtResource("8_6dj5s")
+region = Rect2(0, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_5q7aa"]
+atlas = ExtResource("8_6dj5s")
+region = Rect2(200, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_iwn3p"]
+atlas = ExtResource("8_6dj5s")
+region = Rect2(400, 0, 200, 200)
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_b454s"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_f3r7p")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_82gjj")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_fwjb0")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_7q66e")
+}],
+"loop": false,
+"name": &"attack1",
+"speed": 10.0
+}, {
+"frames": [{
+"duration": 0.05,
+"texture": SubResource("AtlasTexture_535me")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_xwuvi")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_yifyp")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_wxodl")
+}],
+"loop": false,
+"name": &"attack2",
+"speed": 10.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_tcwfc")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_vqvgc")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_g3wkd")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_2e5qg")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_mcsfj")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_7a4eu")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_dqe2v")
+}],
+"loop": true,
+"name": &"death",
+"speed": 5.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_lkmrg")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_7830m")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_lill7")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_p1ulr")
+}],
+"loop": true,
+"name": &"idle",
+"speed": 5.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_sgfj1")
+}],
+"loop": false,
+"name": &"jump_double",
+"speed": 10.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_upws8")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_yymx5")
+}],
+"loop": false,
+"name": &"jump_end",
+"speed": 10.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_rkv5g")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_xw1s7")
+}],
+"loop": true,
+"name": &"jump_loop",
+"speed": 10.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_4x3l2")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_pd8o8")
+}],
+"loop": false,
+"name": &"jump_start",
+"speed": 10.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_tmyxo")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_f2xw6")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_ifigv")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_hyqgq")
+}],
+"loop": true,
+"name": &"run",
+"speed": 10.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_yu4es")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_5q7aa")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_iwn3p")
+}],
+"loop": true,
+"name": &"takeHit",
+"speed": 5.0
+}]
+
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_tokxn"]
+radius = 7.0
+height = 50.0
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_joojj"]
+size = Vector2(17, 36)
+
+[node name="player" type="CharacterBody2D"]
+script = SubResource("GDScript_k3hrk")
+hitbox_offset = Vector2(40, 0)
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]
+sprite_frames = SubResource("SpriteFrames_b454s")
+animation = &"idle"
+autoplay = "idle"
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+visible = false
+position = Vector2(2, 3)
+shape = SubResource("CapsuleShape2D_tokxn")
+
+[node name="HitBox" type="Area2D" parent="."]
+monitoring = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="HitBox"]
+position = Vector2(35, 6)
+shape = SubResource("RectangleShape2D_joojj")
+
+[connection signal="animation_finished" from="AnimatedSprite2D" to="." method="_on_animated_sprite_2d_animation_finished"]
+[connection signal="body_entered" from="HitBox" to="." method="_on_hit_box_body_entered"]
