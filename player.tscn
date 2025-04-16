@@ -18,7 +18,7 @@ script/source = "extends CharacterBody2D
 @export var double_jump_velocity: float = -150
 @export var attack_cooldown: float = 0.5
 @export var max_health: int = 100
-@export var hitbox_offset: Vector2 = Vector2(20, 0)  # Set this to match your current right-side offset
+@export var hitbox_offset: Vector2 = Vector2(10, 0)
 var last_attack_was_1: bool = false
 var is_dead: bool = false
 var current_health: int = max_health
@@ -31,7 +31,9 @@ var was_in_air: bool = false
 var can_attack: bool = true
 var is_attacking: bool = false
 
-# This function processes all physics-related movements like gravity, jumping, etc.
+
+
+
 func _physics_process(delta: float) -> void:
 	if is_dead:
 		return # if dead, ignore input
@@ -177,6 +179,8 @@ func take_damage(amount: int = 1) -> void:
 
 	current_health -= amount
 	print(\"Health:\", current_health)
+	
+	# Update health bar
 
 	# Check if the health is below 0 and handle the death logic
 	if current_health <= 0:
@@ -206,10 +210,10 @@ func die() -> void:
 
 # Update hitbox position based on sprite's facing direction
 func update_hitbox_position():
+	var offset = hitbox_offset
 	if animated_sprite.flip_h:
-		$HitBox.position = Vector2(-hitbox_offset.x, hitbox_offset.y)
-	else:
-		$HitBox.position = hitbox_offset
+		offset.x *= -1
+	$HitBox.position = offset
 		
 # Called when animation finishes
 func _on_animated_sprite_2d_animation_finished():
@@ -537,7 +541,6 @@ shape = SubResource("CapsuleShape2D_tokxn")
 monitoring = false
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="HitBox"]
-position = Vector2(35, 6)
 shape = SubResource("RectangleShape2D_joojj")
 
 [connection signal="animation_finished" from="AnimatedSprite2D" to="." method="_on_animated_sprite_2d_animation_finished"]
