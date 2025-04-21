@@ -5,7 +5,7 @@
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_s1b1s"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_1u6p6"]
-bg_color = Color(0.75, 0.625, 0, 1)
+bg_color = Color(0.380567, 0.232195, 1, 1)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_t584a"]
 bg_color = Color(0.08, 0.08, 0.08, 1)
@@ -16,7 +16,7 @@ expand_margin_bottom = 1.0
 shadow_offset = Vector2(1, 0)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_pqm8g"]
-bg_color = Color(1, 1, 1, 1)
+bg_color = Color(1, 0.18, 0.18, 1)
 
 [node name="health" type="ProgressBar"]
 z_index = 1
