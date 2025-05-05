@@ -1,6 +1,11 @@
-[gd_scene load_steps=2 format=3 uid="uid://cg7eba8h3bfol"]
+[gd_scene load_steps=4 format=3 uid="uid://cg7eba8h3bfol"]
 
 [ext_resource type="Script" path="res://menu.gd" id="1_lktw3"]
+[ext_resource type="Texture2D" uid="uid://bhsia0kyofwmf" path="res://Pixelated Japanese Landscape Serenity.png" id="2_y4nfu"]
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_xcy3s"]
+texture = ExtResource("2_y4nfu")
+modulate_color = Color(1, 1, 1, 0.572549)
 
 [node name="Menu" type="Control"]
 layout_mode = 3
@@ -11,14 +16,14 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_lktw3")
 
-[node name="ColorRect" type="ColorRect" parent="."]
+[node name="Panel" type="Panel" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0, 0, 0, 1)
+theme_override_styles/panel = SubResource("StyleBoxTexture_xcy3s")
 
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
 layout_mode = 1

@@ -1,4 +1,4 @@
-[gd_scene load_steps=46 format=3 uid="uid://ds1itpob76efe"]
+[gd_scene load_steps=54 format=3 uid="uid://ds1itpob76efe"]
 
 [ext_resource type="Texture2D" uid="uid://dy0vn31vj4r56" path="res://Sprites copy/Idle.png" id="1_a23g7"]
 [ext_resource type="Texture2D" uid="uid://b3wx451d28qdj" path="res://Sprites copy/Attack1.png" id="1_gbc4x"]
@@ -18,13 +18,10 @@ script/source = "extends CharacterBody2D
 @export var double_jump_velocity: float = -150
 @export var attack_cooldown: float = 0.5
 @export var max_health: int = 100
-@export var hitbox_offset: Vector2 = Vector2(10, 0)
+
 var last_attack_was_1: bool = false
 var is_dead: bool = false
 var current_health: int = max_health
-@onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite2D
-@onready var health_bar = get_node(\"/root/ground/CanvasLayer/HealthBar\")
-var gravity = ProjectSettings.get_setting(\"physics/2d/default_gravity\")
 var has_double_jumped: bool = false
 var animation_locked: bool = false
 var direction: Vector2 = Vector2.ZERO
@@ -32,17 +29,40 @@ var was_in_air: bool = false
 var can_attack: bool = true
 var is_attacking: bool = false
 var is_knockbacked: bool = false
+var gravity = ProjectSettings.get_setting(\"physics/2d/default_gravity\")
+var attack_type: String = \"\"
+@onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite2D
+@onready var deal_damage_zone = $DealDamage
+@onready var damage_shape: CollisionShape2D = $DealDamage/CollisionShape2D
 
+# Frames when damage is active for each attack
+var attack_hit_frames = {
+	\"attack1\": [2, 3], # Example: frame 3 and 4 active
+	\"attack2\": [2, 3],
+	\"special_attack\": [1, 5]
+}
+var health=100
+var min_health=0
+var can_take_damage:bool
 func _ready():
-	health_bar.init_health(max_health)
+	Global.playerBody = self
+	Global.playerAlive = true
+	is_dead = false
+	can_take_damage = true
+	animated_sprite.connect(\"frame_changed\", Callable(self, \"_on_frame_changed\"))
 
-
+func set_idle_state():
+	# When the player dies or the game is over, play idle animation
+	if not is_dead:
+		animated_sprite.play(\"idle\")
 
 func _physics_process(delta: float) -> void:
+	if not Global.game_started:
+		return
+	Global.playerDamageZone = deal_damage_zone
 	if is_dead:
-		return # if dead, ignore input
+		return
 
-	# Add gravity.
 	if not is_on_floor():
 		velocity += get_gravity() * delta
 		was_in_air = true
@@ -51,25 +71,21 @@ func _physics_process(delta: float) -> void:
 		if was_in_air:
 			land()
 			was_in_air = false
-			
-	if Input.is_action_just_pressed(\"ui_accept\"): # usually Enter or Z
-		take_damage(10)
-	# Handle jump.
+
 	if Input.is_action_just_pressed(\"jump_start\") and not is_attacking:
 		if is_on_floor():
 			jump()
 		elif not has_double_jumped:
 			double_jump()
-
-	# Handle attack input
+	if Input.is_action_just_pressed(\"special_attack\") and can_attack and not is_attacking:
+		special_attack()
 	if Input.is_action_just_pressed(\"attack1\") and can_attack and not is_attacking:
 		if last_attack_was_1:
 			attack2()
 		else:
 			attack1()
 		last_attack_was_1 = !last_attack_was_1
-	
-	# Movement input (skip this if attacking!)
+
 	if not is_attacking and not animation_locked and not is_knockbacked:
 		direction = Input.get_vector(\"left\", \"right\", \"up\", \"down\")
 		if direction.x != 0 and animated_sprite.animation != \"jump_end\":
@@ -77,21 +93,67 @@ func _physics_process(delta: float) -> void:
 		else:
 			velocity.x = move_toward(velocity.x, 0, speed)
 	elif is_knockbacked:
-		# Optional: apply drag to slowly reduce knockback
 		velocity.x = move_toward(velocity.x, 0, speed * delta * 2)
-
-
-
+	check_hitBox()
 	move_and_slide()
 	update_animation()
 	update_facing_direction()
-	update_hitbox_position()
 
-# Updates the animation based on current state
+	
+func _on_frame_changed():
+	var anim = animated_sprite.animation
+	var frame = animated_sprite.frame
+	
+	if is_attacking and anim in attack_hit_frames:
+		var active_frames = attack_hit_frames[anim]
+		if frame in active_frames:
+			damage_shape.disabled = false
+		else:
+			damage_shape.disabled = true
+	else:
+		damage_shape.disabled = true
+		
+func check_hitBox():
+	var hitbox_area=$PlayerHitBox.get_overlapping_areas()
+	var damage:int
+	if hitbox_area:
+		var hitBox=hitbox_area.front()
+		if hitBox.get_parent() is AICharacter or AI2:
+			damage=Global.AiDamageAmount
+			
+	if can_take_damage:
+		take_damage(damage)
+
+func take_damage(damage):
+
+	if damage!=0:
+		if health>0:
+			take_hit()
+			health-=damage
+			print(\"Player Health: \",health)
+			if health<=0:
+				health=0
+				is_dead=true
+				Global.playerAlive=false
+				die()
+			take_damage_cooldown(1.0)
+func die():
+	animated_sprite.play(\"death\")
+	await get_tree().create_timer(3.5).timeout
+	self.queue_free()
+	
+	get_tree().reload_current_scene()
+				
+func take_damage_cooldown(wait_time):
+	can_take_damage=false
+	await get_tree().create_timer(wait_time).timeout
+	can_take_damage=true
+	
+
+		
 func update_animation():
 	if not animation_locked:
 		if is_attacking:
-			# Don't override attack animation
 			return
 		elif not is_on_floor():
 			animated_sprite.play(\"jump_loop\")
@@ -100,140 +162,103 @@ func update_animation():
 		else:
 			animated_sprite.play(\"idle\")
 
-# Update character facing direction
 func update_facing_direction():
 	if direction.x > 0:
 		animated_sprite.flip_h = false
+		deal_damage_zone.scale.x = 1
 	elif direction.x < 0:
 		animated_sprite.flip_h = true
+		deal_damage_zone.scale.x = -1
 
-# Handle normal jump
 func jump():
 	velocity.y = jump_velocity
 	animated_sprite.play(\"jump_start\")
 	animation_locked = true
 
-# Handle double jump
 func double_jump():
 	velocity.y = double_jump_velocity
 	animated_sprite.play(\"jump_double\")
 	animation_locked = true
 	has_double_jumped = true
 
-# Handle landing animation
 func land():
 	animated_sprite.play(\"jump_end\")
 	animation_locked = true
 
-# Basic attack logic for attack1
 func attack1() -> void:
 	is_attacking = true
 	can_attack = false
 	animation_locked = true
+	attack_type = \"attack1\"
 	animated_sprite.play(\"attack1\")
+	set_damage(attack_type)
 
-	# Enable the hitbox right when the attack starts
-	$HitBox.monitoring = true
-
-	# Wait a short moment to simulate active attack window
-	await get_tree().create_timer(0.2).timeout # Adjust this to match your hit timing
-
-	# Disable hitbox after the attack window
-	$HitBox.monitoring = false
-
-	# Wait until the attack animation is fully over
 	await animated_sprite.animation_finished
 
 	can_attack = true
 	is_attacking = false
 	animation_locked = false
-	
-# Alternate attack logic for attack2
+
 func attack2() -> void:
 	is_attacking = true
 	can_attack = false
 	animation_locked = true
+	attack_type = \"attack2\"
 	animated_sprite.play(\"attack2\")
-
-	$HitBox.monitoring = true
-	await get_tree().create_timer(0.2).timeout
-	$HitBox.monitoring = false
+	set_damage(attack_type)
 
 	await animated_sprite.animation_finished
 
 	can_attack = true
 	is_attacking = false
 	animation_locked = false
+func special_attack() -> void:
+	is_attacking = true
+	can_attack = false
+	animation_locked = true
+	attack_type = \"special_attack\"
+	animated_sprite.play(\"special_attack\")
+	set_damage(attack_type)
 
-# Take damage and trigger \"take hit\" animation
+	await animated_sprite.animation_finished
+
+	can_attack = true
+	is_attacking = false
+	animation_locked = false
+func toggle_damage_collision(attack: String) -> void:
+	var damage_zone_collision = deal_damage_zone.get_node(\"CollisionShape2D\")
+	var wait_time : float
+	if attack == \"attack1\":
+		wait_time=.4
+	elif attack==\"attack2\":
+		wait_time=.4
+	damage_zone_collision.disabled=false
+	await get_tree().create_timer(wait_time).timeout
+	damage_zone_collision.disabled=true
+
+		
 func take_hit() -> void:
 	if animation_locked:
-		return 
+		return
 
 	is_attacking = false
 	can_attack = false
 	animation_locked = true
 	animated_sprite.play(\"takeHit\")
 
-
 	animated_sprite.modulate = Color(1, 0.2, 0.2)
 	await get_tree().create_timer(0.1).timeout
-	# Back to normal
 	animated_sprite.modulate = Color(1, 1, 1)
-	# 💥 Knockback
 	var dir = animated_sprite.flip_h if animated_sprite.flip_h else -1
 	apply_knockback(dir)
 
 	await animated_sprite.animation_finished
-
 	can_attack = true
 	animation_locked = false
 
-	
-# Function for taking damage
-func take_damage(amount: int = 1) -> void:
-	if is_dead or animation_locked:
-		return
 
-	current_health -= amount
-	print(\"Health:\", current_health)
-	
-	# Update health bar
-	health_bar.health = current_health
-	# Check if the health is below 0 and handle the death logic
-	if current_health <= 0:
-		die()
-	else:
-		take_hit()
 
-# Handle death logic
-func die() -> void:
-	if is_dead:
-		return
 
-	# Mark character as dead
-	is_dead = true
-	is_attacking = false
-	can_attack = false
-	animation_locked = true
-	velocity = Vector2.ZERO # Stop movement
-	animated_sprite.play(\"death\")
-
-	# Wait for death animation to finish
-	await animated_sprite.animation_finished
-	current_health = max_health
-
-	# Reload the scene for respawn
-	get_tree().reload_current_scene()
-
-# Update hitbox position based on sprite's facing direction
-func update_hitbox_position():
-	var offset = hitbox_offset
-	if animated_sprite.flip_h:
-		offset.x *= -1
-	$HitBox.position = offset
-		
-# Called when animation finishes
 func _on_animated_sprite_2d_animation_finished():
 	if [\"jump_end\", \"jump_start\", \"jump_double\", \"fall\", \"takeHit\"].has(animated_sprite.animation):
 		animation_locked = false
@@ -242,22 +267,28 @@ func _on_animated_sprite_2d_animation_finished():
 		animation_locked = false
 	elif animated_sprite.animation == \"death\":
 		pass
-
-# Hitbox collision detection
-func _on_hit_box_body_entered(body: Node2D):
-	if body.is_in_group(\"enemies\"):
-		print(\"Hit: \", body.name)
-		take_damage(1)
-		
 func apply_knockback(direction: int) -> void:
-	var force = 300.0 # Try a bigger number to exaggerate it
+	var force = 300.0
 	velocity.x = force * direction
 	is_knockbacked = true
-
-	# Reset knockback after a short time
 	await get_tree().create_timer(0.2).timeout
 	is_knockbacked = false
 	
+func set_damage(attack_type):
+	var current_damage_to_deal:int
+	if attack_type==\"attack1\":
+		current_damage_to_deal=8
+	elif attack_type==\"attack2\":
+		current_damage_to_deal=10
+	elif attack_type == \"special_attack\":
+		current_damage_to_deal = 12
+	Global.playerDamageAmount = current_damage_to_deal
+	
+func get_direction() -> Vector2:
+	return Vector2(
+		Input.get_action_strength(\"right\") - Input.get_action_strength(\"left\"),
+		Input.get_action_strength(\"down\") - Input.get_action_strength(\"up\")
+	)
 "
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_f3r7p"]
@@ -378,6 +409,34 @@ region = Rect2(400, 0, 200, 200)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_hyqgq"]
 atlas = ExtResource("2_42hq4")
+region = Rect2(600, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_j8x5m"]
+atlas = ExtResource("1_gbc4x")
+region = Rect2(200, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_f1icc"]
+atlas = ExtResource("1_gbc4x")
+region = Rect2(400, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_02av3"]
+atlas = ExtResource("1_gbc4x")
+region = Rect2(600, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_4rml8"]
+atlas = ExtResource("2_4lm6s")
+region = Rect2(0, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_a1d4o"]
+atlas = ExtResource("2_4lm6s")
+region = Rect2(200, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_s1v2u"]
+atlas = ExtResource("2_4lm6s")
+region = Rect2(400, 0, 200, 200)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_hrk4a"]
+atlas = ExtResource("2_4lm6s")
 region = Rect2(600, 0, 200, 200)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_yu4es"]
@@ -531,6 +590,32 @@ animations = [{
 }, {
 "frames": [{
 "duration": 1.0,
+"texture": SubResource("AtlasTexture_j8x5m")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_f1icc")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_02av3")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_4rml8")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_a1d4o")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_s1v2u")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_hrk4a")
+}],
+"loop": false,
+"name": &"special_attack",
+"speed": 5.0
+}, {
+"frames": [{
+"duration": 1.0,
 "texture": SubResource("AtlasTexture_yu4es")
 }, {
 "duration": 1.0,
@@ -548,29 +633,37 @@ animations = [{
 radius = 7.0
 height = 50.0
 
-[sub_resource type="RectangleShape2D" id="RectangleShape2D_joojj"]
-size = Vector2(17, 36)
+[sub_resource type="CircleShape2D" id="CircleShape2D_hmesc"]
+radius = 15.0333
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_lkhbe"]
+radius = 16.0
 
 [node name="player" type="CharacterBody2D"]
 script = SubResource("GDScript_k3hrk")
-hitbox_offset = Vector2(40, 0)
 
 [node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]
 sprite_frames = SubResource("SpriteFrames_b454s")
-animation = &"takeHit"
+animation = &"special_attack"
 autoplay = "idle"
-frame_progress = 0.765396
+frame = 6
+frame_progress = 1.0
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
-visible = false
 position = Vector2(2, 3)
 shape = SubResource("CapsuleShape2D_tokxn")
 
-[node name="HitBox" type="Area2D" parent="."]
-monitoring = false
+[node name="DealDamage" type="Area2D" parent="."]
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="HitBox"]
-shape = SubResource("RectangleShape2D_joojj")
+[node name="CollisionShape2D" type="CollisionShape2D" parent="DealDamage"]
+position = Vector2(49, 4)
+shape = SubResource("CircleShape2D_hmesc")
+disabled = true
+
+[node name="PlayerHitBox" type="Area2D" parent="."]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PlayerHitBox"]
+position = Vector2(0, 3)
+shape = SubResource("CircleShape2D_lkhbe")
 
 [connection signal="animation_finished" from="AnimatedSprite2D" to="." method="_on_animated_sprite_2d_animation_finished"]
-[connection signal="body_entered" from="HitBox" to="." method="_on_hit_box_body_entered"]
