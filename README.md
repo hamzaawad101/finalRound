@@ -36,6 +36,7 @@
 | Attack          | A               |
 
 ##📁 Project Structure
+```plaintext
 finalRound/
 ├── .vscode/                 # VSCode settings
 ├── characters/              # Character scenes and prefabs
