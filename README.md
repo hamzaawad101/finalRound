@@ -28,7 +28,7 @@
 * Press F5 or click the ▶ Play Scene button to start the game.
 * The default scene (e.g., ground.tscn) can be configured under Project > Project Settings > Application > Run > Main Scene.
 
-##🎮 Controls
+## 🎮 Controls
 | Action          | Key             |
 | --------------- | ----------------|
 | Move Left/Right | Left/Right Arrow|
