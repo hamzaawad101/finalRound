@@ -35,7 +35,7 @@
 | Jump            | Up Arrow        |
 | Attack          | A               |
 
-##📁 Project Structure
+## 📁 Project Structure
 ```plaintext
 finalRound/
 ├── .vscode/                 # VSCode settings
